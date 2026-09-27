@@ -1,6 +1,6 @@
 {
   "name": "sshclient",
-  "version": "0.2.1",
+  "version": "0.2.0",
   "description": "A custom SSH and SFTP client",
   "main": "src/main/main.js",
   "desktopName": "sshclient.desktop",
