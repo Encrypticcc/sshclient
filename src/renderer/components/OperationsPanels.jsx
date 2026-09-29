@@ -16,7 +16,7 @@ import {
 import { GridCard, ViewToggle, GRID_CLASS } from '@/components/GridCard';
 import { ColorPicker } from '@/components/ColorPicker';
 import SelectHostPanel from '@/components/SelectHostPanel';
-import { planSnippetLaunch } from '@/lib/snippet-launch.mjs';
+import { planSnippetLaunch, snippetRunRefusal } from '@/lib/snippet-launch.mjs';
 import { useViewMode } from '@/lib/view-mode';
 import { toneForId, toneStyle } from '@/lib/tone';
 import { HostIcon } from '@/lib/host-icons.jsx';
@@ -434,7 +434,9 @@ function NewSnippetPanel({ hosts, editingSnippet, onSaved, onClose, onNewHost })
       id: editingSnippet?.id,
       name: name.trim(),
       command,
-      targets,
+      // A deleted host is not shown in the list. Writing its id back would
+      // leave the snippet unable to run, because a missing target blocks launch.
+      targets: targets.filter((id) => hosts.some((host) => host.id === id)),
       runLocal,
       cwd: runLocal ? cwd.trim() : '',
       color,
@@ -721,7 +723,7 @@ export function SnippetsPanel({ tabs, hosts = [], onLaunchSnippet, onNewHost }) 
     const result = await window.api.snippetsSave({
       name: `${item.name} copy`,
       command: item.command,
-      targets: item.targets ?? [],
+      targets: (item.targets ?? []).filter((id) => hosts.some((host) => host.id === id)),
       runLocal: item.runLocal === true,
       cwd: item.runLocal === true ? item.cwd : '',
       color: item.color ?? null,
@@ -742,14 +744,12 @@ export function SnippetsPanel({ tabs, hosts = [], onLaunchSnippet, onNewHost }) 
       return;
     }
 
-    const runnable = Boolean(plan.local) || plan.hosts.length > 0;
-    if (!runnable) {
-      setError('None of this snippet\u2019s targets still exist under Hosts');
+    const refusal = snippetRunRefusal(plan);
+    if (refusal) {
+      setError(refusal);
       return;
     }
-    setError(
-      plan.missingHostIds.length ? 'Some of this snippet\u2019s targets no longer exist under Hosts' : ''
-    );
+    setError('');
     onLaunchSnippet?.(item, plan);
   }
 
