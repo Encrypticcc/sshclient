@@ -71,16 +71,15 @@ test('saves a snippet that runs on this machine', (t) => {
   vault.init(dataDir);
   vault.setup('demo-password');
 
-  const cwd = path.join(dataDir, 'workdir');
   const snippets = vault.saveSnippet({
     name: 'Where',
     command: 'pwd',
     runLocal: true,
-    cwd,
+    cwd: 'demo-workdir',
     targets: ['host-1'],
   });
   assert.equal(snippets[0].runLocal, true);
-  assert.equal(snippets[0].cwd, cwd);
+  assert.equal(snippets[0].cwd, undefined);
   assert.deepEqual(snippets[0].targets, ['host-1']);
 
   const cleared = vault.saveSnippet({
@@ -88,44 +87,9 @@ test('saves a snippet that runs on this machine', (t) => {
     name: 'Where',
     command: 'pwd',
     runLocal: false,
-    cwd,
     targets: ['host-1'],
   });
   assert.equal(cleared[0].runLocal, undefined);
   assert.equal(cleared[0].cwd, undefined);
   assert.deepEqual(cleared[0].targets, ['host-1']);
-});
-
-test('drops a non-string snippet working directory and still stores host targets', (t) => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sshclient-vault-snippet-cwd-'));
-  t.after(() => {
-    vault.shutdown();
-    fs.rmSync(dataDir, { recursive: true, force: true });
-  });
-
-  vault.init(dataDir);
-  vault.setup('demo-password');
-
-  const snippets = vault.saveSnippet({
-    name: 'Bad cwd',
-    command: 'pwd',
-    runLocal: true,
-    cwd: 12,
-    targets: ['host-2'],
-  });
-  assert.equal(snippets[0].runLocal, true);
-  assert.equal(snippets[0].cwd, undefined);
-  assert.deepEqual(snippets[0].targets, ['host-2']);
-
-  const blank = vault.saveSnippet({
-    id: snippets[0].id,
-    name: 'Bad cwd',
-    command: 'pwd',
-    runLocal: true,
-    cwd: '   ',
-    targets: ['host-2'],
-  });
-  assert.equal(blank[0].runLocal, true);
-  assert.equal(blank[0].cwd, undefined);
-  assert.deepEqual(blank[0].targets, ['host-2']);
 });

@@ -387,7 +387,7 @@ export default function App() {
     return result.sessionId;
   }
 
-  function snippetIo() {
+  function snippetIo(groupId) {
     return {
       localConnect: (config) => window.api.localConnect(config),
       localWrite: (sessionId, data) => window.api.localWrite(sessionId, data),
@@ -396,6 +396,11 @@ export default function App() {
       sshWrite: (sessionId, data) => window.api.sshWrite(sessionId, data),
       sshDisconnect: (sessionId) => window.api.sshDisconnect(sessionId),
       isAbandoned: (launch) => abandonedPendingRef.current.delete(launch.placeholderId),
+      // Synchronous on purpose: the id has to be on the tab before input is
+      // sent, and before this call returns to the event loop.
+      claimSession: (launch, sessionId) => {
+        adoptSession(launch.placeholderId, sessionId, groupId, launch.type);
+      },
       onSshReady: (sessionId, onReady) => {
         pendingReadyActionRef.current.set(sessionId, { onReady });
       },
@@ -453,26 +458,23 @@ export default function App() {
       ...launch,
       placeholderId: placeholders[index].id,
     }));
-    const outcomes = await deliverSnippetPlaces(snippet, stamped, snippetIo());
+    const outcomes = await deliverSnippetPlaces(snippet, stamped, snippetIo(groupId));
 
     const problems = [];
     outcomes.forEach((outcome, index) => {
       const placeholder = placeholders[index];
-      if (outcome.abandoned) return;
-      if (outcome.error) {
-        // The slot stays, holding the error: the place is still named, and
-        // reconnecting it is one click rather than a rerun of the snippet.
-        setTabs((prev) =>
-          prev.map((t) =>
-            t.id === placeholder.id
-              ? { ...t, status: 'error', error: outcome.error, pending: false }
-              : t
-          )
-        );
-        problems.push(`${placeholder.title}: ${outcome.error}`);
-        return;
-      }
-      adoptSession(placeholder.id, outcome.sessionId, groupId, placeholder.type);
+      if (outcome.abandoned || !outcome.error) return;
+      // The slot stays, holding the error: the place is still named, and
+      // reconnecting it is one click rather than a rerun of the snippet.
+      // A session that connected was already given its id as it returned.
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.id === placeholder.id
+            ? { ...t, status: 'error', error: outcome.error, pending: false }
+            : t
+        )
+      );
+      problems.push(`${placeholder.title}: ${outcome.error}`);
     });
     if (problems.length) setConnectError(problems.join(' · '));
   }
@@ -719,9 +721,7 @@ export default function App() {
     if (outcome.error) {
       setConnectError(outcome.error);
       dropPending(placeholderId);
-      return;
     }
-    adoptSession(placeholderId, outcome.sessionId, undefined, 'local');
   }
 
   async function launchSnippet(snippet, plan) {

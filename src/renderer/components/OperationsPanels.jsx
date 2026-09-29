@@ -1,6 +1,5 @@
 import { forwardRef, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -26,7 +25,6 @@ import {
   ArrowRightLeft,
   Code2,
   Copy,
-  FolderOpen,
   Pencil,
   Play,
   Plus,
@@ -401,9 +399,6 @@ function NewSnippetPanel({ hosts, editingSnippet, onSaved, onClose, onNewHost })
   const [command, setCommand] = useState(editingSnippet?.command ?? '');
   const [targets, setTargets] = useState(editingSnippet?.targets ?? []);
   const [runLocal, setRunLocal] = useState(editingSnippet?.runLocal === true);
-  const [cwd, setCwd] = useState(
-    editingSnippet?.runLocal === true && typeof editingSnippet?.cwd === 'string' ? editingSnippet.cwd : ''
-  );
   const [color, setColor] = useState(editingSnippet?.color ?? null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -411,11 +406,7 @@ function NewSnippetPanel({ hosts, editingSnippet, onSaved, onClose, onNewHost })
   const { blurHostIps } = usePrivacySettings();
 
   const availableHosts = hosts.filter((h) => !targets.includes(h.id));
-
-  async function handleBrowseCwd() {
-    const result = await window.api.selectFolder();
-    if (result?.path) setCwd(result.path);
-  }
+  const canPickMore = !runLocal || availableHosts.length > 0;
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -438,7 +429,6 @@ function NewSnippetPanel({ hosts, editingSnippet, onSaved, onClose, onNewHost })
       // leave the snippet unable to run, because a missing target blocks launch.
       targets: targets.filter((id) => hosts.some((host) => host.id === id)),
       runLocal,
-      cwd: runLocal ? cwd.trim() : '',
       color,
     });
     setBusy(false);
@@ -455,7 +445,15 @@ function NewSnippetPanel({ hosts, editingSnippet, onSaved, onClose, onNewHost })
         title="Add targets"
         subtitle={name || 'New snippet'}
         hosts={availableHosts}
-        onSelect={(item) => setTargets((t) => [...t, item.id])}
+        showLocal={!runLocal}
+        onSelect={(item) => {
+          if (item.kind === 'local') {
+            setRunLocal(true);
+            if (availableHosts.length === 0) setPicking(false);
+            return;
+          }
+          setTargets((t) => [...t, item.id]);
+        }}
         onBack={() => setPicking(false)}
         onNewHost={onNewHost}
       />
@@ -495,47 +493,31 @@ function NewSnippetPanel({ hosts, editingSnippet, onSaved, onClose, onNewHost })
         <div className="flex flex-col gap-2">
           <Label>Targets for execution</Label>
           <p className="text-xs text-muted-foreground">
-            Attach this machine or saved hosts to connect and run this snippet on them in one click.
+            Attach a local terminal or saved hosts to connect and run this snippet on them in one click.
           </p>
 
-          <label className="flex cursor-pointer items-center gap-2.5 rounded-md bg-foreground/[0.06] px-2.5 py-1.5 text-sm">
-            <Checkbox
-              checked={runLocal}
-              onCheckedChange={(checked) => {
-                const on = checked === true;
-                setRunLocal(on);
-                if (!on) setCwd('');
-              }}
-            />
-            <Terminal className="size-3.5 text-muted-foreground" />
-            This machine
-          </label>
-
-          {runLocal && (
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="snippet-cwd">Working directory (optional)</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="snippet-cwd"
-                  placeholder="Home directory"
-                  value={cwd}
-                  onChange={(e) => setCwd(e.target.value)}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  onClick={handleBrowseCwd}
-                  title="Choose folder"
-                >
-                  <FolderOpen className="size-4" />
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {targets.length > 0 && (
+          {(runLocal || targets.length > 0) && (
             <div className="flex flex-col gap-1">
+              {runLocal && (
+                <div className="flex items-center gap-2 rounded-md bg-foreground/[0.06] px-2.5 py-1.5">
+                  <span
+                    className="flex size-7 shrink-0 items-center justify-center rounded-md"
+                    style={toneStyle(toneForId('local'))}
+                  >
+                    <Terminal className="size-3.5" />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm">Local terminal</span>
+                  <button
+                    type="button"
+                    onClick={() => setRunLocal(false)}
+                    title="Remove target"
+                    aria-label="Remove target Local terminal"
+                    className="shrink-0 text-muted-foreground hover:text-destructive"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </div>
+              )}
               {targets.map((hostId) => {
                 const host = hosts.find((h) => h.id === hostId);
                 if (!host) return null;
@@ -579,7 +561,7 @@ function NewSnippetPanel({ hosts, editingSnippet, onSaved, onClose, onNewHost })
             </div>
           )}
 
-          {availableHosts.length > 0 ? (
+          {canPickMore ? (
             <Button
               type="button"
               variant="outline"
@@ -589,12 +571,10 @@ function NewSnippetPanel({ hosts, editingSnippet, onSaved, onClose, onNewHost })
             >
               <Plus className="size-3.5" /> Add target
             </Button>
-          ) : hosts.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              No saved hosts yet. Add one under Hosts, or run this on this machine.
-            </p>
           ) : (
-            <p className="text-xs text-muted-foreground">All saved hosts are already targets.</p>
+            hosts.length > 0 && (
+              <p className="text-xs text-muted-foreground">All saved hosts are already targets.</p>
+            )
           )}
         </div>
 
@@ -613,8 +593,8 @@ function NewSnippetPanel({ hosts, editingSnippet, onSaved, onClose, onNewHost })
 function snippetSubtitle(item) {
   const count = item.targets?.length ?? 0;
   const local = item.runLocal === true;
-  if (local && count === 0) return `${item.command} · This machine`;
-  if (local) return `${item.command} · This machine · ${count} target${count === 1 ? '' : 's'}`;
+  if (local && count === 0) return `${item.command} · Local terminal`;
+  if (local) return `${item.command} · Local terminal · ${count} target${count === 1 ? '' : 's'}`;
   if (count > 0) return `${item.command} · ${count} target${count === 1 ? '' : 's'}`;
   return item.command;
 }
@@ -725,7 +705,6 @@ export function SnippetsPanel({ tabs, hosts = [], onLaunchSnippet, onNewHost }) 
       command: item.command,
       targets: (item.targets ?? []).filter((id) => hosts.some((host) => host.id === id)),
       runLocal: item.runLocal === true,
-      cwd: item.runLocal === true ? item.cwd : '',
       color: item.color ?? null,
     });
     if (!result.error) setItems(result.snippets);

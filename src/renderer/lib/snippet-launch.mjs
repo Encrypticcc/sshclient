@@ -3,8 +3,8 @@
  *
  * Host ids that no longer match a saved host are reported and left out of
  * `hosts`. A snippet that names nothing is `untargeted`: the caller sends it
- * to an SSH session that is already open. `runLocal` with no cwd uses the
- * login shell's home directory.
+ * to an SSH session that is already open. `runLocal` opens a local terminal
+ * in the home directory.
  */
 export function planSnippetLaunch(snippet, hosts) {
   const hostList = Array.isArray(hosts) ? hosts : [];
@@ -21,8 +21,7 @@ export function planSnippetLaunch(snippet, hosts) {
   }
 
   const runLocal = snippet?.runLocal === true;
-  const cwd = typeof snippet?.cwd === 'string' ? snippet.cwd.trim() : '';
-  const local = runLocal ? (cwd ? { cwd } : {}) : null;
+  const local = runLocal ? {} : null;
 
   return {
     local,
@@ -53,15 +52,13 @@ export function commandText(command) {
 }
 
 /**
- * One entry per place the snippet will open. A local shell carries its
- * working directory. An SSH place carries the saved host id.
+ * One entry per place the snippet will open. A local shell uses the home
+ * directory. An SSH place carries the saved host id.
  */
 export function placesFor(plan) {
   const launches = [];
   if (plan?.local) {
-    const connectConfig = {};
-    if (plan.local.cwd) connectConfig.cwd = plan.local.cwd;
-    launches.push({ title: 'This machine', type: 'local', connectConfig });
+    launches.push({ title: 'Local terminal', type: 'local', connectConfig: {} });
   }
   for (const host of plan?.hosts ?? []) {
     launches.push({
@@ -96,6 +93,11 @@ async function settlePlace(launch, command, io) {
     return { launch, error: result?.error || 'Could not start the connection' };
   }
 
+  // The tab has to carry this id before any input. A command that exits the
+  // local shell, or an SSH host-key prompt from a faster member of the group,
+  // is reported under this id and otherwise matches nothing.
+  io.claimSession?.(launch, result.sessionId);
+
   // A local pty accepts input the moment it exists. SSH does not: the
   // command has to wait until the session is ready, or it is typed into
   // the password prompt.
@@ -110,9 +112,10 @@ async function settlePlace(launch, command, io) {
 }
 
 /**
- * Connect every place and send the snippet command. Local shells are
- * written immediately. SSH shells are handed to `io.onSshReady` and are
- * not written here.
+ * Connect every place and send the snippet command. Each place is claimed
+ * as its own connection returns, without waiting for the others. Local
+ * shells are written after that claim. SSH shells are handed to
+ * `io.onSshReady` and are not written here.
  */
 export async function deliverSnippetPlaces(snippet, launches, io) {
   const command = commandText(snippet?.command);

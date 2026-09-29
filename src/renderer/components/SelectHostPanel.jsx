@@ -22,6 +22,7 @@ export default function SelectHostPanel({
   onSelect,
   onBack,
   onNewHost,
+  showLocal = false,
 }) {
   const [query, setQuery] = useState('');
   const q = query.trim().toLowerCase();
@@ -38,6 +39,7 @@ export default function SelectHostPanel({
       ),
     [hosts, q]
   );
+  const localVisible = showLocal && (!q || 'local terminal'.includes(q));
 
   return (
     <div className="flex h-full flex-col animate-slide-in-right">
@@ -74,10 +76,33 @@ export default function SelectHostPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto p-3">
-        {filteredSessions.length === 0 && filteredHosts.length === 0 ? (
+        {!localVisible && filteredSessions.length === 0 && filteredHosts.length === 0 ? (
           <p className="px-2 py-8 text-center text-sm text-muted-foreground">No matches</p>
         ) : (
           <>
+            {localVisible && (
+              <div className="flex flex-col gap-0.5 pb-3">
+                <button
+                  type="button"
+                  onClick={() => onSelect({ kind: 'local', id: 'local', label: 'Local terminal' })}
+                  className={`flex items-center gap-3 rounded-lg px-2 py-2 text-left text-sm transition-colors ${
+                    selectedId === 'local:local' ? 'bg-accent' : 'hover:bg-accent/50'
+                  }`}
+                >
+                  <span
+                    className="flex size-10 shrink-0 items-center justify-center rounded-lg"
+                    style={toneStyle(toneForId('local'))}
+                  >
+                    <Terminal className="size-4" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">Local terminal</p>
+                    <p className="truncate text-xs text-muted-foreground">This machine</p>
+                  </div>
+                </button>
+              </div>
+            )}
+
             {filteredSessions.length > 0 && (
               <>
                 <p className="px-2 pb-1.5 text-sm font-semibold">Connected</p>

@@ -58,7 +58,7 @@ function MemberButton({ tab, host, active, onSelect, onClose }) {
     >
       <span
         className="flex size-7 shrink-0 items-center justify-center rounded-md"
-        style={toneStyle(host?.color || toneForId(host?.id ?? tab.id))}
+        style={toneStyle(isLocal ? toneForId('local') : host?.color || toneForId(host?.id ?? tab.id))}
       >
         {isLocal ? (
           <Terminal className="size-3.5" />
