@@ -39,7 +39,7 @@ export default function SelectHostPanel({
       ),
     [hosts, q]
   );
-  const localVisible = showLocal && (!q || 'local terminal'.includes(q));
+  const localVisible = showLocal && (!q || 'local terminal'.includes(q) || 'this machine'.includes(q));
 
   return (
     <div className="flex h-full flex-col animate-slide-in-right">
