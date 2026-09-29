@@ -405,8 +405,10 @@ function NewSnippetPanel({ hosts, editingSnippet, onSaved, onClose, onNewHost })
   const [picking, setPicking] = useState(false);
   const { blurHostIps } = usePrivacySettings();
 
-  const availableHosts = hosts.filter((h) => !targets.includes(h.id));
-  const canPickMore = !runLocal || availableHosts.length > 0;
+  const checkedIds = [
+    ...(runLocal ? ['local:local'] : []),
+    ...targets.map((id) => `host:${id}`),
+  ];
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -444,15 +446,15 @@ function NewSnippetPanel({ hosts, editingSnippet, onSaved, onClose, onNewHost })
       <SelectHostPanel
         title="Add targets"
         subtitle={name || 'New snippet'}
-        hosts={availableHosts}
-        showLocal={!runLocal}
+        hosts={hosts}
+        showLocal
+        checkedIds={checkedIds}
         onSelect={(item) => {
           if (item.kind === 'local') {
-            setRunLocal(true);
-            if (availableHosts.length === 0) setPicking(false);
+            setRunLocal((on) => !on);
             return;
           }
-          setTargets((t) => [...t, item.id]);
+          setTargets((t) => (t.includes(item.id) ? t.filter((id) => id !== item.id) : [...t, item.id]));
         }}
         onBack={() => setPicking(false)}
         onNewHost={onNewHost}
@@ -561,21 +563,15 @@ function NewSnippetPanel({ hosts, editingSnippet, onSaved, onClose, onNewHost })
             </div>
           )}
 
-          {canPickMore ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="self-start"
-              onClick={() => setPicking(true)}
-            >
-              <Plus className="size-3.5" /> Add target
-            </Button>
-          ) : (
-            hosts.length > 0 && (
-              <p className="text-xs text-muted-foreground">All saved hosts are already targets.</p>
-            )
-          )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="self-start"
+            onClick={() => setPicking(true)}
+          >
+            <Plus className="size-3.5" /> Add target
+          </Button>
         </div>
 
         {error && <p className="text-sm text-destructive">{error}</p>}
