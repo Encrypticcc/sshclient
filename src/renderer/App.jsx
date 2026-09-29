@@ -387,29 +387,46 @@ export default function App() {
   }
 
   /**
-   * Launching a snippet that carries several targets opens one tab, not one
-   * per host: the machines it names belong together, so they get a single
-   * window with a strip down the left to move between them.
+   * A snippet aimed at more than one place opens one tab. This machine and
+   * every saved host it names belong together, so they get a single window
+   * with a strip down the left to move between them.
    *
-   * The group and a slot for every host are on screen in the first render,
-   * before any socket is opened, and the connections then race each other
-   * instead of queueing behind one another. The command is sent to each host
-   * as it comes up.
+   * The group and a slot for every place are on screen in the first render,
+   * before any shell is opened, and the connections then race each other
+   * instead of queueing behind one another. The command is typed into each
+   * one as it comes up. A local shell has no ready event — the pty takes
+   * input the moment it exists — so that command is written as soon as
+   * connect returns. SSH still waits until the session is ready, because
+   * writing earlier would land in the password prompt.
    */
-  async function openSnippetGroup(snippet, targetHosts) {
+  async function openSnippetGroup(snippet, plan) {
     setConnectError(null);
-    if (!targetHosts.length) return;
+
+    const launches = [];
+    if (plan.local) {
+      const connectConfig = {};
+      if (plan.local.cwd) connectConfig.cwd = plan.local.cwd;
+      launches.push({ title: 'This machine', type: 'local', connectConfig });
+    }
+    for (const host of plan.hosts) {
+      launches.push({
+        title: host.label || host.host,
+        type: 'ssh',
+        connectConfig: { hostId: host.id },
+      });
+    }
+    if (launches.length < 2) return;
 
     const groupId = `group:${crypto.randomUUID()}`;
     const command = snippet.command.endsWith('\n') ? snippet.command : `${snippet.command}\n`;
 
-    const placeholders = targetHosts.map((host) => ({
+    const placeholders = launches.map((launch) => ({
       id: `pending:${crypto.randomUUID()}`,
-      title: host.label || host.host,
-      type: 'ssh',
+      title: launch.title,
+      type: launch.type,
       status: 'connecting',
       stage: 'connecting',
-      connectConfig: { hostId: host.id },
+      connectConfig: launch.connectConfig,
       groupId,
       pending: true,
     }));
@@ -433,20 +450,26 @@ export default function App() {
 
     const outcomes = await Promise.all(
       placeholders.map(async (placeholder) => {
+        const connect =
+          placeholder.type === 'local' ? window.api.localConnect : window.api.sshConnect;
         let result;
         try {
-          result = await window.api.sshConnect(placeholder.connectConfig);
+          result = await connect(placeholder.connectConfig);
         } catch (err) {
           result = { error: err.message };
         }
 
         if (abandonedPendingRef.current.delete(placeholder.id)) {
-          if (result?.sessionId) await window.api.sshDisconnect(result.sessionId);
+          if (result?.sessionId) {
+            const disconnect =
+              placeholder.type === 'local' ? window.api.localDisconnect : window.api.sshDisconnect;
+            await disconnect(result.sessionId);
+          }
           return null;
         }
 
         if (result.error) {
-          // The slot stays, holding the error: the host is still named, and
+          // The slot stays, holding the error: the place is still named, and
           // reconnecting it is one click rather than a rerun of the snippet.
           setTabs((prev) =>
             prev.map((t) =>
@@ -458,10 +481,16 @@ export default function App() {
           return `${placeholder.title}: ${result.error}`;
         }
 
-        pendingReadyActionRef.current.set(result.sessionId, {
-          onReady: () => window.api.sshWrite(result.sessionId, command),
-        });
-        adoptSession(placeholder.id, result.sessionId, groupId, 'ssh');
+        if (placeholder.type === 'local') {
+          // Parked on the SSH ready handler this write would never fire:
+          // a local pty does not emit one.
+          window.api.localWrite(result.sessionId, command);
+        } else {
+          pendingReadyActionRef.current.set(result.sessionId, {
+            onReady: () => window.api.sshWrite(result.sessionId, command),
+          });
+        }
+        adoptSession(placeholder.id, result.sessionId, groupId, placeholder.type);
         return null;
       })
     );
@@ -676,6 +705,32 @@ export default function App() {
     } catch {}
   }
 
+  // A new local tab every time. An open local shell has no host id to match
+  // against, so reusing one would type the command into whatever directory
+  // that shell happened to be in.
+  async function runSnippetLocally(snippet, local) {
+    const command = snippet.command.endsWith('\n') ? snippet.command : `${snippet.command}\n`;
+    const connectConfig = local.cwd ? { cwd: local.cwd } : {};
+    try {
+      const sessionId = await openSession(connectConfig, snippet.name, 'local');
+      if (sessionId) window.api.localWrite(sessionId, command);
+    } catch {}
+  }
+
+  async function launchSnippet(snippet, plan) {
+    const places = (plan.local ? 1 : 0) + plan.hosts.length;
+    if (places === 0) return;
+    if (places === 1 && plan.local) {
+      await runSnippetLocally(snippet, plan.local);
+      return;
+    }
+    if (places === 1) {
+      await runOnHost(plan.hosts[0], snippet.command);
+      return;
+    }
+    await openSnippetGroup(snippet, plan);
+  }
+
   function runSnippetInActiveTab(snippet) {
     const selected = tabs.find((t) => t.id === activeTabId);
     const tab =
@@ -849,7 +904,7 @@ export default function App() {
               onRunOnHost={runOnHost}
               onConnectAndStartForward={connectAndStartForward}
               onHostsChange={setHosts}
-              onRunSnippetOnHosts={openSnippetGroup}
+              onLaunchSnippet={launchSnippet}
               onSelectGroupMember={selectGroupMember}
             />
 

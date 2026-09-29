@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -15,6 +16,7 @@ import {
 import { GridCard, ViewToggle, GRID_CLASS } from '@/components/GridCard';
 import { ColorPicker } from '@/components/ColorPicker';
 import SelectHostPanel from '@/components/SelectHostPanel';
+import { planSnippetLaunch } from '@/lib/snippet-launch.mjs';
 import { useViewMode } from '@/lib/view-mode';
 import { toneForId, toneStyle } from '@/lib/tone';
 import { HostIcon } from '@/lib/host-icons.jsx';
@@ -24,6 +26,7 @@ import {
   ArrowRightLeft,
   Code2,
   Copy,
+  FolderOpen,
   Pencil,
   Play,
   Plus,
@@ -397,6 +400,10 @@ function NewSnippetPanel({ hosts, editingSnippet, onSaved, onClose, onNewHost })
   const [name, setName] = useState(editingSnippet?.name ?? '');
   const [command, setCommand] = useState(editingSnippet?.command ?? '');
   const [targets, setTargets] = useState(editingSnippet?.targets ?? []);
+  const [runLocal, setRunLocal] = useState(editingSnippet?.runLocal === true);
+  const [cwd, setCwd] = useState(
+    editingSnippet?.runLocal === true && typeof editingSnippet?.cwd === 'string' ? editingSnippet.cwd : ''
+  );
   const [color, setColor] = useState(editingSnippet?.color ?? null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -404,6 +411,11 @@ function NewSnippetPanel({ hosts, editingSnippet, onSaved, onClose, onNewHost })
   const { blurHostIps } = usePrivacySettings();
 
   const availableHosts = hosts.filter((h) => !targets.includes(h.id));
+
+  async function handleBrowseCwd() {
+    const result = await window.api.selectFolder();
+    if (result?.path) setCwd(result.path);
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -423,6 +435,8 @@ function NewSnippetPanel({ hosts, editingSnippet, onSaved, onClose, onNewHost })
       name: name.trim(),
       command,
       targets,
+      runLocal,
+      cwd: runLocal ? cwd.trim() : '',
       color,
     });
     setBusy(false);
@@ -479,8 +493,44 @@ function NewSnippetPanel({ hosts, editingSnippet, onSaved, onClose, onNewHost })
         <div className="flex flex-col gap-2">
           <Label>Targets for execution</Label>
           <p className="text-xs text-muted-foreground">
-            Attach saved hosts to connect and run this snippet on them in one click.
+            Attach this machine or saved hosts to connect and run this snippet on them in one click.
           </p>
+
+          <label className="flex cursor-pointer items-center gap-2.5 rounded-md bg-foreground/[0.06] px-2.5 py-1.5 text-sm">
+            <Checkbox
+              checked={runLocal}
+              onCheckedChange={(checked) => {
+                const on = checked === true;
+                setRunLocal(on);
+                if (!on) setCwd('');
+              }}
+            />
+            <Terminal className="size-3.5 text-muted-foreground" />
+            This machine
+          </label>
+
+          {runLocal && (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="snippet-cwd">Working directory (optional)</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="snippet-cwd"
+                  placeholder="Home directory"
+                  value={cwd}
+                  onChange={(e) => setCwd(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={handleBrowseCwd}
+                  title="Choose folder"
+                >
+                  <FolderOpen className="size-4" />
+                </Button>
+              </div>
+            </div>
+          )}
 
           {targets.length > 0 && (
             <div className="flex flex-col gap-1">
@@ -538,7 +588,9 @@ function NewSnippetPanel({ hosts, editingSnippet, onSaved, onClose, onNewHost })
               <Plus className="size-3.5" /> Add target
             </Button>
           ) : hosts.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No saved hosts yet — add one under Hosts first.</p>
+            <p className="text-xs text-muted-foreground">
+              No saved hosts yet. Add one under Hosts, or run this on this machine.
+            </p>
           ) : (
             <p className="text-xs text-muted-foreground">All saved hosts are already targets.</p>
           )}
@@ -557,9 +609,19 @@ function NewSnippetPanel({ hosts, editingSnippet, onSaved, onClose, onNewHost })
 }
 
 function snippetSubtitle(item) {
-  return item.targets?.length
-    ? `${item.command} · ${item.targets.length} target${item.targets.length === 1 ? '' : 's'}`
-    : item.command;
+  const count = item.targets?.length ?? 0;
+  const local = item.runLocal === true;
+  if (local && count === 0) return `${item.command} · This machine`;
+  if (local) return `${item.command} · This machine · ${count} target${count === 1 ? '' : 's'}`;
+  if (count > 0) return `${item.command} · ${count} target${count === 1 ? '' : 's'}`;
+  return item.command;
+}
+
+function snippetRunTitle(item) {
+  const count = item.targets?.length ?? 0;
+  if (item.runLocal === true && count === 0) return 'Run locally';
+  if (count > 0 || item.runLocal === true) return 'Run on targets';
+  return 'Run snippet';
 }
 
 function SnippetContextMenu({ item, onRun, onEdit, onDuplicate, onDelete, children }) {
@@ -604,7 +666,7 @@ function SnippetGridCard({ item, onRun, onEdit, onDuplicate, onDelete }) {
                 e.stopPropagation();
                 onRun(item);
               }}
-              title={item.targets?.length ? 'Run on targets' : 'Run snippet'}
+              title={snippetRunTitle(item)}
               className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
             >
               <Play className="size-3.5" />
@@ -638,7 +700,7 @@ function SnippetGridCard({ item, onRun, onEdit, onDuplicate, onDelete }) {
   );
 }
 
-export function SnippetsPanel({ tabs, hosts = [], onRunOnHost, onRunSnippetOnHosts, onNewHost }) {
+export function SnippetsPanel({ tabs, hosts = [], onLaunchSnippet, onNewHost }) {
   const sessions = sshTabs(tabs);
   const [items, setItems] = useState([]);
   const [query, setQuery] = useState('');
@@ -660,38 +722,35 @@ export function SnippetsPanel({ tabs, hosts = [], onRunOnHost, onRunSnippetOnHos
       name: `${item.name} copy`,
       command: item.command,
       targets: item.targets ?? [],
+      runLocal: item.runLocal === true,
+      cwd: item.runLocal === true ? item.cwd : '',
       color: item.color ?? null,
     });
     if (!result.error) setItems(result.snippets);
   }
 
   function run(item) {
-    if (item.targets?.length) {
+    const plan = planSnippetLaunch(item, hosts);
+    if (plan.untargeted) {
+      const id = sessions[0]?.id;
+      if (!id) {
+        setError('Connect to an SSH host before running a snippet, or attach targets to it');
+        return;
+      }
       setError('');
-      const targetHosts = item.targets
-        .map((hostId) => hosts.find((h) => h.id === hostId))
-        .filter(Boolean);
-      if (!targetHosts.length) {
-        setError('None of this snippet\u2019s targets still exist under Hosts');
-        return;
-      }
-      // Several machines named by one snippet belong together, so they open as
-      // a single tab with a strip of them down its side. A lone target has
-      // nothing to sit beside and stays an ordinary tab.
-      if (targetHosts.length > 1 && onRunSnippetOnHosts) {
-        onRunSnippetOnHosts(item, targetHosts);
-        return;
-      }
-      for (const host of targetHosts) onRunOnHost?.(host, item.command);
+      window.api.sshWrite(id, item.command.endsWith('\n') ? item.command : `${item.command}\n`);
       return;
     }
 
-    const id = sessions[0]?.id;
-    if (!id) {
-      setError('Connect to an SSH host before running a snippet, or attach targets to it');
+    const runnable = Boolean(plan.local) || plan.hosts.length > 0;
+    if (!runnable) {
+      setError('None of this snippet\u2019s targets still exist under Hosts');
       return;
     }
-    window.api.sshWrite(id, item.command.endsWith('\n') ? item.command : `${item.command}\n`);
+    setError(
+      plan.missingHostIds.length ? 'Some of this snippet\u2019s targets no longer exist under Hosts' : ''
+    );
+    onLaunchSnippet?.(item, plan);
   }
 
   function handleSaved(nextItems) {
@@ -738,7 +797,7 @@ export function SnippetsPanel({ tabs, hosts = [], onRunOnHost, onRunSnippetOnHos
             <EmptyState
               Icon={Code2}
               title="No snippets yet"
-              description="Save a command to send it to any connected terminal in one click."
+              description="Save a command to run it on this machine or on a connected terminal."
               action={
                 <Button size="sm" onClick={open}>
                   <Plus className="size-4" /> New Snippet
@@ -782,7 +841,7 @@ export function SnippetsPanel({ tabs, hosts = [], onRunOnHost, onRunSnippetOnHos
                       <>
                         <button
                           onClick={() => run(item)}
-                          title={item.targets?.length ? 'Run on targets' : 'Run snippet'}
+                          title={snippetRunTitle(item)}
                           className={iconButtonClass}>
                           <Play className="size-3.5" />
                         </button>
